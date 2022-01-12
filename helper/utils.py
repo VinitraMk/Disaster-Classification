@@ -76,5 +76,11 @@ def save_model(model, model_path, model_name, is_nn = False):
         with open(f'{model_path}/{model_name}_model.pt', 'wb') as f:
             torch.save(model, f)
 
+def save_tensor(tensor_obj, tensor_name):
+    config = get_all_args()["config"]
+    filename = f"{config['processed_io_path']}\\input\\tensor_{tensor_name}.pt"
+    with open(filename, 'wb') as f:
+        torch.save(tensor_obj, f)
+
 def download_model(model_path):
     return joblib.load(model_path)

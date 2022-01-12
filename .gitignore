@@ -1,2 +1,8 @@
 /input
 /venv
+/visualizations
+/experimental-logs
+/output
+/processed_io
+config.json
+*.py[cod]
