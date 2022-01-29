@@ -14,6 +14,7 @@ class DisasterDataset(Dataset):
             self.y = self.data['target']
         else:
             self.X = self.data
+            self.y = None
 
     def __len__(self):
         return len(self.data)
@@ -22,7 +23,20 @@ class DisasterDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        label = self.y.iloc[idx] if self.y is not None else -1
+        if self.y is not None:
+            label = self.y.iloc[idx]
+            '''
+            label = [0.0000, 0.0000]
+            if self.y.iloc[idx] == 1:
+                label[1] = 1.0000
+            else:
+                label[0] = 1.0000
+            '''
+        else:
+            #label = [0.0000, 0.0000]
+            label = 0
+
+        #label = self.y.iloc[idx] if self.y is not None else -1
         text = self.X.iloc[idx]['text']
         id = self.X.iloc[idx]['id']
         sample = { "text": text, "label": label, "id": id }

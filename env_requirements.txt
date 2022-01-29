@@ -32,6 +32,6 @@ dependencies:
       - threadpoolctl==2.1.0
       - tqdm==4.60.0
       - xgboost==1.4.0
-      - torch==1.7.1
+      - torch==1.10.1
       - torchtext==0.11.1
 name: azureml_827e128cd328fc260d12d0073223eff7

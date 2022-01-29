@@ -9,10 +9,17 @@ config:
 
 model_args:
     model: 'ann'
-    batch_size: 1000
-    num_epochs: 10
+    batch_size: 527
+    num_epochs: 5
+    word2vec_epochs: 1000
+    embed_dim: 128
+    window_size: 10
     lr: 0.001
-
+    momentum: 0.8
+    text_max_length: 35
+    stride: 2
+    out_size: 64
+    final_output_size: 1
 
 preproc_args:
     train_validation_split: 0.9

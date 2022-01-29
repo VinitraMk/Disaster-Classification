@@ -4,6 +4,7 @@ import yaml
 import pandas as pd
 import joblib
 import torch
+import numpy as np
 
 def get_filename(filename):
     now = datetime.now().strftime('%d%m%Y-%H%M%S')
@@ -73,14 +74,35 @@ def save_model(model, model_path, model_name, is_nn = False):
         with open(f'{model_path}/{model_name}_model.sav', 'wb') as f:
                 joblib.dump(model, f)
     else:
-        with open(f'{model_path}/{model_name}_model.pt', 'wb') as f:
-            torch.save(model, f)
+        model_output_path = f'{model_path}/{model_name}_model.tar'
+        torch.save(model, model_output_path)
+
+def save_model_supports(model_obj, model_path, filename):
+    output_path = f'{model_path}/{filename}.pt'
+    torch.save(model_obj, output_path)
 
 def save_tensor(tensor_obj, tensor_name):
     config = get_all_args()["config"]
     filename = f"{config['processed_io_path']}\\input\\tensor_{tensor_name}.pt"
-    with open(filename, 'wb') as f:
-        torch.save(tensor_obj, f)
+    torch.save(tensor_obj, filename)
 
 def download_model(model_path):
     return joblib.load(model_path)
+
+def init_weights(m):
+    classname = m.__class__.__name__
+    # for every Linear layer in a model..
+    if classname.find('Linear') != -1:
+        # get the number of the inputs
+        n = m.in_features
+        y = 1.0/np.sqrt(n)
+        m.weight.data.uniform_(-y, y)
+        m.bias.data.fill_(0)
+    elif classname.find('EmbeddingBag') != -1 or classname.find('Embedding') != -1:
+        config = get_config()
+        weights = torch.load(f"{config['processed_io_path']}\\input\\tensor_word_embeddings_weights.pt")
+        #model_arg = get_model_params()
+        #n = model_arg["embed_dim"]
+        #y = 1.0/np.sqrt(n)
+        m.weight.data = weights
+    
