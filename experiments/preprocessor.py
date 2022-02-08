@@ -71,6 +71,8 @@ class Preprocessor:
             yield self.tokenizer(self.__clean_data(data_iter[i][text]))
 
     def __adding_padding(self, x, max_text_len):
+        if len(x) > max_text_len:
+            x = x[:max_text_len]
         zeros = [0] * (max_text_len - len(x))
         x = x + zeros
         return x

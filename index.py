@@ -1,4 +1,5 @@
 import os
+from sklearn.utils import shuffle
 import torch
 from torch.utils.data.dataset import random_split
 from torch.utils.data.dataloader import DataLoader
@@ -14,10 +15,14 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 from gensim.models import Word2Vec
+from constants.model_enums import Model
 
 #custom imports
 from experiments.preprocessor import Preprocessor
+from helper.augmenter import generate_new_data
 from models.ann import ANN
+from models.cnn import CNN
+from models.rnn import RNN
 from experiments.DisasterDataset import DisasterDataset
 from helper.utils import get_config, get_filename, get_model_params, get_preproc_params, init_weights, save_fig, save_model, save_model_supports, save_tensor
 
@@ -31,6 +36,7 @@ class Index:
     test_dataset = None
     model_details = dict()
     no_of_batches = 0
+    split_train_dataset = None
 
     def __init__(self):
         if not(os.getenv('ROOT_DIR')):
@@ -38,12 +44,17 @@ class Index:
 
     def start_program(self):
         self.__define_args()
+        self.__generate_new_data()
         self.__preprocess_data()
         self.__prepare_datasets()
         self.__get_word2vec_embeddings()
         self.__make_model()
         self.__make_azure_resources()
-        self.__start_training()
+        print("############# Starting training with pseudo data as test data #############################\n\n")
+        self.__start_training(self.new_data_loader, True)
+        self.__merge_output_with_training()
+        print("############# Starting training with pseudo data merged with train #############################\n\n")
+        self.__start_training(self.test_loader)
         
     def __define_args(self):
         print('\nDefining configs...')
@@ -51,11 +62,17 @@ class Index:
         self.config = get_config()
         self.preproc_args = get_preproc_params()
 
+    def __generate_new_data(self):
+        print('Generating new data...')
+        train_dataset = pd.read_csv(f'{self.config["input_path"]}\\train.csv')
+        generate_new_data(train_dataset["text"])
+
     def __preprocess_data(self):
         print('Setting up preprocessor...')
         self.preprocessor = Preprocessor()
         self.train_dataset = DisasterDataset(f'{self.config["input_path"]}\\train.csv')
         self.test_dataset = DisasterDataset(f'{self.config["input_path"]}\\test.csv', False)
+        self.new_dataset = DisasterDataset(f'{self.config["input_path"]}\\new_data.csv', False)
         self.preprocessor.start_preprocessing(self.train_dataset)
     
     def __prepare_datasets(self):
@@ -63,9 +80,11 @@ class Index:
         num_train = int(len(self.train_dataset) * self.preproc_args["train_validation_split"])
         self.no_of_batches = int(num_train / self.model_args["batch_size"])
         split_train_, split_valid_ = random_split(self.train_dataset, [num_train, len(self.train_dataset) - num_train])
+        self.split_train_dataset = split_train_
         self.train_loader = DataLoader(split_train_, batch_size = self.model_args["batch_size"], shuffle = True, collate_fn=self.preprocessor.collate_batch)
         self.valid_loader = DataLoader(split_valid_, batch_size = self.model_args["batch_size"], shuffle = True, collate_fn=self.preprocessor.collate_batch)
         self.test_loader = DataLoader(self.test_dataset, batch_size = self.model_args["batch_size"], shuffle=False, collate_fn=self.preprocessor.collate_batch)
+        self.new_data_loader = DataLoader(self.new_dataset, batch_size = self.model_args["batch_size"], shuffle=False, collate_fn=self.preprocessor.collate_batch)
 
     def __get_word2vec_embeddings(self):
         embedding_model_path = f'{self.config["processed_io_path"]}\\models\\word_embeddings.model' 
@@ -85,18 +104,26 @@ class Index:
         self.weight_matrix = self.preprocessor.build_vocab_weights()
         save_tensor(self.weight_matrix, 'word_embeddings_weights')
         print('\tInitializing model...')
-        self.model = ANN(self.preprocessor.get_vocab_size(), self.model_args["embed_dim"], 2, self.model_args["out_size"], self.model_args["stride"], self.model_args["text_max_length"], self.model_args["final_output_size"])
+        if (self.model_args["model"] == Model.ANN):
+            self.model = ANN(self.preprocessor.get_vocab_size(), self.model_args["embed_dim"], 2)
+        elif (self.model_args["model"] == Model.CNN):
+            self.model = CNN(self.preprocessor.get_vocab_size(), self.model_args["embed_dim"], 2, self.model_args["out_size"], self.model_args["stride"], self.model_args["text_max_length"], self.model_args["final_output_size"])
+        elif (self.model_args["model"] == Model.RNN):
+            self.model = RNN(self.model_args["lstm_size"], self.model_args["embed_dim"], self.model_args["num_layers"], self.model_args["num_words"], self.model_args["dropout"])
         self.model.apply(init_weights)
         criterion = torch.nn.BCELoss()
-        optimizer = torch.optim.RMSprop(self.model.parameters(), lr = self.model_args['lr'])
+        optimizer = torch.optim.SGD(self.model.parameters(), lr = self.model_args['lr'], momentum = self.model_args["momentum"])
         model_obj = {
             'model_state': self.model.state_dict(),
             'criterion': criterion,
             'optimizer_state': optimizer.state_dict()
         }
+        if self.model_args == Model.RNN:
+            prev_state_h, prev_state_c = self.model.init_state(self.model_args["text_max_length"])
+            model_obj["rnn_prev_state_h"], model_obj["rnn_prev_state_c"] = prev_state_h, prev_state_c
         model_path = f"{self.config['processed_io_path']}\\models"
         print('\tSaving model')
-        save_model(model_obj, model_path, 'ann', True)
+        save_model(model_obj, model_path, self.model_args["model"], True)
     
     def __make_azure_resources(self):
         print('\nConfiguring Azure Resources...')
@@ -113,11 +140,15 @@ class Index:
         self.def_blob_store = self.azws.get_default_datastore()
 
     def __copy_model_chkpoint(self):
-        local_model_path = f"{self.config['internal_output_path']}/ann_model.tar"
-        upload_model_path = f"{self.config['processed_io_path']}/models/ann_model.tar"
+        local_model_path = f"{self.config['internal_output_path']}/{self.model_args['model']}_model.tar"
+        upload_model_path = f"{self.config['processed_io_path']}/models/{self.model_args['model']}_model.tar"
         if (os.path.isfile(local_model_path)):
             os.system(f"copy {local_model_path} {upload_model_path}")
 
+    def __merge_output_with_training(self):
+        new_train_dataset = torch.utils.data.ConcatDataset([self.split_train_dataset, self.new_dataset])
+        self.train_loader = DataLoader(new_train_dataset, batch_size = self.model_args["batch_size"], shuffle = True, collate_fn=self.preprocessor.collate_batch)
+        
     def __train_model_in_azure(self, is_first_batch = False, is_last_batch = False):
         #self.__copy_model_chkpoint()
         print('\t\tUploading data to blob storage...')
@@ -130,7 +161,7 @@ class Index:
         config = ScriptRunConfig(
             source_directory='./models/training_scripts',
             script='train_nn.py',
-            arguments=[input_data, output, 'ann', self.preprocessor.get_vocab_size(), is_first_batch, is_last_batch, model_args_string],
+            arguments=[input_data, output, self.model_args["model"], self.preprocessor.get_vocab_size(), is_first_batch, is_last_batch, model_args_string],
             compute_target="mikasa",
             environment=self.azenv
         )
@@ -145,9 +176,9 @@ class Index:
         MODEL_CONTAINER = f'{MAIN_OUTPUT_CONTAINER}/models'
         MODEL_DETAILS_CONTAINER = f'{MAIN_OUTPUT_CONTAINER}/internal_output'
         LOCAL_MODELDET_PATH = f"{config['experimental_output_path']}\\model_details.json"
-        LOCAL_MODEL_PATH = f"{config['internal_output_path']}\\ann_model.tar"
+        LOCAL_MODEL_PATH = f"{config['internal_output_path']}\\{self.model_args['model']}_model.tar"
         blob_service_client = BlobServiceClient(account_url=STORAGE_ACCOUNT_URL, credential=os.environ["AZURE_STORAGE_CONNECTIONKEY"])
-        blob_client_model = blob_service_client.get_blob_client(MODEL_CONTAINER, 'ann_model.tar', snapshot=None)
+        blob_client_model = blob_service_client.get_blob_client(MODEL_CONTAINER, f'{self.model_args["model"]}_model.tar', snapshot=None)
         blob_client_modeldet = blob_service_client.get_blob_client(MODEL_DETAILS_CONTAINER, 'model_details.json', snapshot=None)
         self.__download_blob(LOCAL_MODEL_PATH, blob_client_model)
         self.__download_blob(LOCAL_MODELDET_PATH, blob_client_modeldet)
@@ -159,7 +190,7 @@ class Index:
             blob_data = blob_client_instance.download_blob()
             blob_data.readinto(my_blob)
 
-    def __plot_loss_accuracy(self):
+    def __plot_loss_accuracy(self, filename):
         #plot for loss and accuracy
         print("\nPlotting loss and accuracy for all epochs")
         x = np.arange(1, self.model_args["num_epochs"]+1)
@@ -174,18 +205,28 @@ class Index:
         avg_loss/=self.model_args["num_epochs"]
         print("\tAverage accuracy:", avg_acc)
         print("\tAverage loss:", avg_loss, "\n")
-        
+        model_logs = {
+            'average_accuracy': avg_acc,
+            'average_loss': avg_loss,
+            'model_filename': filename,
+            'model_params': json.dumps(self.model_args),
+            'preprocessing_params': json.dumps(self.preproc_args)
+        }
+        log_output_path = f"{self.config['experimental_output_path']}\\{filename}.json"
+        with open(log_output_path, 'w+') as f:
+            json.dump(model_logs, f)
+
         plt.plot(x, y1, color="red", marker='o', linewidth=3, markersize=5)
         plt.plot(x, y2, color="green", marker="*", linewidth=3, markersize=5)
         save_fig("loss_accuracy_plot", plt)
         plt.clf()
 
-    def __evaluate_model(self, data_loader, is_test_dataset = False):
+    def __evaluate_model(self, data_loader, is_pseudo_test = False, is_test_dataset = False):
         if is_test_dataset:
             print('\nGetting test data predictions...')
         else:
             print('\nEvaluating model with validation set...')
-        model_state_path = f"{self.config['internal_output_path']}\\ann_model.tar"
+        model_state_path = f"{self.config['internal_output_path']}\\{self.model_args['model']}_model.tar"
         model_object = torch.load(model_state_path, map_location=torch.device("cpu"))
         self.model.load_state_dict(model_object['model_state'])
         self.model.eval()
@@ -194,8 +235,11 @@ class Index:
             results_df = pd.DataFrame([], columns=['id', 'target'])
         with torch.no_grad():
             for i, batch in enumerate(data_loader):
-                predicted_probs = self.model(batch[1], batch[3])
-                predicted_labels = (predicted_probs > 0.5).float()
+                if self.model_args["model"] == Model.CNN:
+                    predicted_probs = self.model(batch[1])
+                elif self.model_args["model"] == Model.ANN:
+                    predicted_probs = self.model(batch[1], batch[3])
+                predicted_labels = (predicted_probs > 0.5).int()
                 actual_labels = batch[0]
                 if not(is_test_dataset):
                     total_acc += (predicted_labels == actual_labels).sum().item()
@@ -212,16 +256,22 @@ class Index:
                     current_epoch_name = f"epoch_{self.model_details['current_epoch']}"
                     self.model_details[current_epoch_name]["loss"] = model_details["loss"] / self.no_of_batches
                     self.model_details[current_epoch_name]["accuracy"] = accu_val
+            elif is_pseudo_test:
+                new_data_df = pd.read_csv(f"{self.config['input_path']}\\new_data.csv")
+                new_data_df['target'] = results_df['target']
+                csv_output_path = f"{self.config['output_path']}\\internal_output\\new_data.csv"
+                new_data_df.to_csv(csv_output_path)
+                self.new_dataset = DisasterDataset(csv_output_path, True)
             else:
-                csv_output_path = f"{self.config['output_path']}\\{get_filename('ann')}.csv"
+                filename = get_filename(self.model_args["model"])
+                csv_output_path = f"{self.config['output_path']}\\{filename}.csv"
                 results_df.to_csv(csv_output_path, index = False)
-                self.__plot_loss_accuracy()
-
+                self.__plot_loss_accuracy(filename)
         
         return accu_val
         
    
-    def __start_training(self):
+    def __start_training(self, test_loader, is_pseudo_test = False):
         print("Vocabulary size: ", self.preprocessor.get_vocab_size(), '\n')
         for epoch in range(1, self.model_args["num_epochs"] + 1):
             print('\nRunning epoch', epoch)
@@ -239,9 +289,10 @@ class Index:
             self.__download_output()
             accu_val = self.__evaluate_model(self.valid_loader)
             print(f'Accuracy after epoch {epoch}:', accu_val)
-        self.__evaluate_model(self.test_loader, True)
-            
-
+        if is_pseudo_test:
+            self.__evaluate_model(test_loader, True)
+        else:
+            self.__evaluate_model(test_loader, False, True)
 
 if __name__ == "__main__":
     warnings.filterwarnings("ignore", category=DeprecationWarning)

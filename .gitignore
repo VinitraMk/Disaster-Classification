@@ -1,7 +1,7 @@
 /input
 /venv
 /visualizations
-/experimental-logs
+/experimental_logs
 /output
 /processed_io
 config.json
