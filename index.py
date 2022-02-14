@@ -15,10 +15,11 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 from gensim.models import Word2Vec
-from constants.model_enums import Model
+from sklearn.model_selection import KFold
 
 #custom imports
 from experiments.preprocessor import Preprocessor
+from constants.model_enums import Model
 from helper.augmenter import generate_new_data
 from models.ann import ANN
 from models.cnn import CNN
@@ -109,7 +110,7 @@ class Index:
         elif (self.model_args["model"] == Model.CNN):
             self.model = CNN(self.preprocessor.get_vocab_size(), self.model_args["embed_dim"], 2, self.model_args["out_size"], self.model_args["stride"], self.model_args["text_max_length"], self.model_args["final_output_size"])
         elif (self.model_args["model"] == Model.RNN):
-            self.model = RNN(self.model_args["lstm_size"], self.model_args["embed_dim"], self.model_args["num_layers"], self.model_args["num_words"], self.model_args["dropout"])
+            self.model = RNN(self.model_args["lstm_size"], self.model_args["embed_dim"], self.model_args["num_layers"], self.preprocessor.get_vocab_size(), self.model_args["dropout"])
         self.model.apply(init_weights)
         criterion = torch.nn.BCELoss()
         optimizer = torch.optim.SGD(self.model.parameters(), lr = self.model_args['lr'], momentum = self.model_args["momentum"])

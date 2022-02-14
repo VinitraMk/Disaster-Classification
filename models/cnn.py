@@ -16,7 +16,7 @@ class CNN(nn.ModuleList):
         self.kernel_1 = 2
         self.kernel_2 = 3
         self.kernel_3 = 4
-        self.kernel_4 = 5
+        #self.kernel_4 = 5
         self.out_size = out_size 
         self.stride = stride
 
@@ -26,11 +26,11 @@ class CNN(nn.ModuleList):
         self.conv1 = Conv1d(self.seq_len, self.out_size, self.kernel_1, self.stride)
         self.conv2 = Conv1d(self.seq_len, self.out_size, self.kernel_2, self.stride)
         self.conv3 = Conv1d(self.seq_len, self.out_size, self.kernel_3, self.stride)
-        self.conv4 = Conv1d(self.seq_len, self.out_size, self.kernel_4, self.stride)
+        #self.conv4 = Conv1d(self.seq_len, self.out_size, self.kernel_4, self.stride)
         self.pool1 = MaxPool1d(self.kernel_1, self.stride)
         self.pool2 = MaxPool1d(self.kernel_2, self.stride)
         self.pool3 = MaxPool1d(self.kernel_3, self.stride)
-        self.pool4 = MaxPool1d(self.kernel_4, self.stride)
+        #self.pool4 = MaxPool1d(self.kernel_4, self.stride)
         self.relu = ReLU()
         self.fc = Linear(self.in_features_fc(), final_output_size)
         self.act = Sigmoid()
@@ -62,13 +62,13 @@ class CNN(nn.ModuleList):
         out_pool_3 = math.floor(out_pool_3)
         
         # Calcualte size of convolved/pooled features for convolution_4/max_pooling_4 features
-        out_conv_4 = ((self.embedding_size - 1 * (self.kernel_4 - 1) - 1) / self.stride) + 1
-        out_conv_4 = math.floor(out_conv_4)
-        out_pool_4 = ((out_conv_4 - 1 * (self.kernel_4 - 1) - 1) / self.stride) + 1
-        out_pool_4 = math.floor(out_pool_4)
+        #out_conv_4 = ((self.embedding_size - 1 * (self.kernel_4 - 1) - 1) / self.stride) + 1
+        #out_conv_4 = math.floor(out_conv_4)
+        #out_pool_4 = ((out_conv_4 - 1 * (self.kernel_4 - 1) - 1) / self.stride) + 1
+        #out_pool_4 = math.floor(out_pool_4)
       
         # Returns "flattened" vector (input for fully connected layer)
-        return (out_pool_1 + out_pool_2 + out_pool_3 + out_pool_4) * self.out_size
+        return (out_pool_1 + out_pool_2 + out_pool_3) * self.out_size
 
     def forward(self, text):
         embedded = self.embedding(text)
@@ -90,11 +90,11 @@ class CNN(nn.ModuleList):
         x3 = self.pool3(x3)
 
         #convolution layer 1
-        x4 = self.conv4(embedded)
-        x4 = self.relu(x4)
-        x4 = self.pool4(x4)
+        #x4 = self.conv4(embedded)
+        #x4 = self.relu(x4)
+        #x4 = self.pool4(x4)
 
-        output_union = torch.cat((x1, x2, x3, x4), 2)
+        output_union = torch.cat((x1, x2, x3), 2)
         output_union = output_union.reshape(output_union.size(0), -1)
 
         out = self.fc(output_union)

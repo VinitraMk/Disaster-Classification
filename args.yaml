@@ -8,18 +8,20 @@ config:
 
 
 model_args:
-    model: 'cnn'
+    model: 'rnn'
     batch_size: 527
     num_epochs: 5
     word2vec_epochs: 1000
-    embed_dim: 64
+    embed_dim: 128
     window_size: 10
-    lr: 0.01
-    momentum: 0.8
+    lr: 0.001
     text_max_length: 35
-    stride: 2
-    out_size: 32
-    final_output_size: 1
+    momentum: 0.8
+    lstm_size: 3
+    num_layers: 2
+    dropout: 0.25
 
 preproc_args:
     train_validation_split: 0.9
+    kfold_k1: 13
+    kfold_k2: 28
